@@ -1,72 +1,43 @@
-/*
-   Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+var crypto = require('crypto')
+var logger = require('winston')
 
-   Licensed under the Apache License, Version 2.0 (the "License"). You
-   may not use this file except in compliance with the License. A copy
-   of the License is located at
+var encryptedPrivateKey = 'MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAKIRxHEN/1xPRCiRWGJwAikRZ4VAb5dOnE3JZASRq6j479cwaigBhlNmyYGea6EOeTq/6pHr6b8SeN+AuzLZtmP8KxCnvYK5ySgtwerzYe+x6jeXOZ5lEHq1+cw9+yBuIoMnRlv5SL4lMqgwNWek+KzaVM39f456xODgAT5VMe/BAgMBAAECgYB12SOV7c69Kepu8VlqovX/NOeornU2efQQYBv5co93XCTSviLDGnC5nqlyNmcfAu5GOR1xpDEhPmZkZzA4RrVnjuNUHO1eDI2plJg8rchys1YN9gYB2QCuPGQIb4CMkCB6/FXs+VpewrDYGHw39ritmryjfMT+UY+Z+Ecd3+smQQJBAORG05GyMkWMQCyjpPTDtqkAHNhTh8NvOxgi9BCQVUd8IPEzQx4OOyo7kSj4Rcp4Q+nfmQJ4WEO2kNSuvN+XfPkCQQC1wIrDVy1PrDI0pZzafFV/HVtKCEVRoiezRZfnk5v3LuZ2z/e1wIUBVqRRwxhqU5ss7FK/7GfB7Sz4sSG1rKMJAkAo4q6eF8Z9QmN0G1M+K5eZqVWBQWS9kjyJVClWliNQDGFyEfZhebcLF2QmbGFDpEq1psCm+psEdbx2+10ExwMxAkAZjY501EbckrskR7x7w0tJ6dix2ePVDFVEkR5AQrKE2CUywx5ygTSx8Xp8vE8sc8C3WipwLU6RJ0VRWaYBotnxAkEA0PCJyi/k48fZ0rzbLFDMUEDGU2ib2vOsWBm/Krcu3Xb8/0UPGcepIdGvOw8HovZnC35asHLljT5fdk+bn/yLUQ=='
+	var a = 1470227500748
+var input = ['345c59b3-705e-4073-b5a5-7ee6aec45402', 'https://marketplace.walmartapis.com/v2/orders/released?limit=10', 'GET', a].join('\n')
 
-      http://aws.amazon.com/apache2.0/
 
-   or in the "license" file accompanying this file. This file is
-   distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
-   OF ANY KIND, either express or implied. See the License for the
-   specific language governing permissions and limitations under the
-   License.
- */
-var express = require('express');
-var app = express();
-var path = require('path');
-var os = require('os');
-var bodyParser = require('body-parser');
-var fs = require('fs');
+  var private_key_buffer = new Buffer(encryptedPrivateKey)
+  var private_key = '-----BEGIN PRIVATE KEY-----\r\n' + private_key_buffer.toString() + '\r\n-----END PRIVATE KEY-----'
+  var res
 
-var add_comment = function(comment) {
-    var comments = get_comments();
-    comments.push({"date": new Date(), "text": comment});
-    fs.writeFileSync('./comments.json', JSON.stringify(comments));
-};
+  try {
+    var sign = crypto.createSign('RSA-SHA256')
+    sign.write(input)
+    sign.end()
+    logger.info('walmartUtil, signRequest, private_key : ' + private_key)
+    var signature = sign.sign(private_key, 'base64')
+    logger.info('walmartUtil, signRequest, signature : ' + signature)
+    res = signature
 
-var get_comments = function() {
-    var comments;
-    if (fs.existsSync('./comments.json')) {
-        comments = fs.readFileSync('./comments.json');
-        comments = JSON.parse(comments);
-    } else {
-        comments = [];
-    }
-    return comments;
-};
+  } catch(e) {
+    logger.info('walmartUtil, signRequest, exception while generating signature : ' + e.code  + ', ' + e.message)
+    logger.info('walmartUtil, signRequest, exception while generating signature, switching to key generation for windows ')
 
-app.use(function log (req, res, next) {
-  console.log([req.method, req.url].join(' '));
-  next();
-});
-app.use(express.static('public'));
-app.use(bodyParser.urlencoded({ extended: false }))
+    //private_key = getKeyForWindows(private_key_buffer)
+	key = private_key_buffer
+	var a = key.slice(0,64)
+	  for(var i=64; i <=784 ; i+=64){
+		a = a + '\n' + key.slice(i, i+64)
+	  }
+	  a = a + '\n' + key.slice(832)
+  private_key =  '-----BEGIN EC PRIVATE KEY-----\r\n' + a.toString() + '\r\n-----END EC PRIVATE KEY-----'
+    var signWin = crypto.createSign('RSA-SHA256')
+    signWin.write(input)
+    signWin.end()
+	logger.info('walmartUtil, signRequest, private_key from getKeyForWindows : ' + private_key)
+    var signatureWin = signWin.sign(private_key, 'base64')
+    logger.info('walmartUtil, signRequest, signatureWin : ' + signatureWin)
+    res = signatureWin
+  }
 
-app.set('view engine', 'jade');
-app.get('/', function(req, res) {
-    var comments = get_comments();
-    res.render("index",
-               { agent: req.headers['user-agent'],
-                 hostname: os.hostname(),
-                 os: os.type(),
-                 nodeversion: process.version,
-                 time: new Date(),
-                 admin: (process.env.APP_ADMIN_EMAIL || "admin@unconfigured-value.com" ),
-                 comments: get_comments()
-               });
-});
-
-app.post('/', function(req, res) {
-    var comment = req.body.comment;
-    if (comment) {
-        add_comment(comment);
-        console.log("Got comment: " + comment);
-    }
-    res.redirect("/#form-section");
-});
-
-var server = app.listen(process.env.PORT || 3000, function() {
-    console.log('Listening on %s', process.env.PORT);
-});
+  logger.info('res', res)
